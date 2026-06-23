@@ -1,374 +1,112 @@
-print("yomka")
--- УЛЬТИМАТИВНЫЙ БЕЗОПАСНЫЙ ЛОАДЕР
-local safe_pcall = pcall
+print("[Yoxi Loader] --- СТАРТ ЛОАДЕРА ---")
 
-local success, fatal_error = safe_pcall(function()
-    local _loadstring = loadstring or load
-    
-    -- Безопасные обертки для сломанных библиотек task на мобилках
-    local _spawn = (type(task) == "table" and type(task.spawn) == "function" and task.spawn) or spawn or function(f) coroutine.resume(coroutine.create(f)) end
-    local _wait = (type(task) == "table" and type(task.wait) == "function" and task.wait) or wait
-    local _delay = (type(task) == "table" and type(task.delay) == "function" and task.delay) or delay or function(t, f) _spawn(function() _wait(t) f() end) end
+local _loadstring = loadstring or load
+if type(_loadstring) ~= "function" then
+    warn("[Yoxi Loader] ФАТАЛЬНО: Экзекутор не поддерживает loadstring.")
+    return
+end
 
-    -- Защищенный HttpGet
-    local function doHttpGet(url)
-        if type(game.HttpGet) == "function" then
-            return game:HttpGet(url)
-        elseif type(game.HttpGetAsync) == "function" then
-            return game:HttpGetAsync(url)
-        else
-            error("Данный экзекутор вообще не поддерживает HttpGet")
-        end
+print("[Yoxi Loader] Шаг 1: Подготовка окружения")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+
+local _spawn = (type(task) == "table" and type(task.spawn) == "function" and task.spawn) or spawn
+local _wait = (type(task) == "table" and type(task.wait) == "function" and task.wait) or wait
+local _delay = (type(task) == "table" and type(task.delay) == "function" and task.delay) or delay
+
+print("[Yoxi Loader] Шаг 2: Поиск GUI")
+local function GetSafeGuiParent()
+    if type(gethui) == "function" then
+        return gethui()
     end
-
-    if not game:IsLoaded() then
-        game.Loaded:Wait()
+    if type(CoreGui) == "userdata" then
+        return CoreGui
     end
+    return Players.LocalPlayer:WaitForChild("PlayerGui")
+end
 
-    local Players = game:GetService("Players")
-    local TweenService = game:GetService("TweenService")
-    local RunService = game:GetService("RunService")
-    local TextService = game:GetService("TextService")
-    local Lighting = game:GetService("Lighting")
-    local UserInputService = game:GetService("UserInputService")
-    local CoreGui = game:GetService("CoreGui")
+local targetParent = GetSafeGuiParent()
+if not targetParent then warn("[Yoxi Loader] Нет места для создания UI!") end
 
-    local API_URL = "https://yoxi-hub.fun/api/loader"
-    local MAINTENANCE_MODE = true
-    local ALLOWED_TESTER = "hopeonly_l"
+print("[Yoxi Loader] Шаг 3: Создание UI")
+-- Облегченный UI, чтобы исключить баги мобильного рендера
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "YOXI_Loader"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
-    local function GetSafeGuiParent()
-        local s, hui = pcall(function() return gethui() end)
-        if s and hui then return hui end
-        local s2, core = pcall(function() return CoreGui end)
-        if s2 and core then return core end
-        return Players.LocalPlayer:WaitForChild("PlayerGui", 10)
-    end
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+    syn.protect_gui(screenGui)
+end
+screenGui.Parent = targetParent
 
-    local function getIds()
-        local timeout = 10 
-        local elapsed = 0
-        while game.PlaceId == 0 and elapsed < timeout do 
-            _wait(0.5) 
-            elapsed = elapsed + 0.5
-        end
-        return tostring(game.PlaceId), tostring(game.GameId)
-    end
+local background = Instance.new("Frame")
+background.Size = UDim2.new(1, 0, 1, 0)
+background.BackgroundColor3 = Color3.fromRGB(5, 2, 2)
+background.Parent = screenGui
 
-    local function normalizeResponse(response)
-        if type(response) ~= "string" then return nil end
-        response = response:gsub("^\239\187\191", ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if response == "" then return nil end
+local textLabel = Instance.new("TextLabel")
+textLabel.Size = UDim2.new(1, 0, 1, 0)
+textLabel.BackgroundTransparency = 1
+textLabel.Text = "YOXI HUB\nLoading..."
+textLabel.TextColor3 = Color3.fromRGB(255, 15, 15)
+textLabel.TextSize = 40
+textLabel.Font = Enum.Font.GothamBlack
+textLabel.Parent = background
 
-        local lower = response:lower()
-        if lower:find("<html") or lower:find("<!doctype") then
-            warn("[Yoxi Hub] Cloudflare заблокировал запрос (HTML/Капча). Проверьте настройки сайта!")
-            return nil
-        end
-        if lower == "нет" or lower:find("^error") or lower:find("^forbidden") or lower:find("^blocked") then
-            warn("[Yoxi Hub] Ошибка доступа от сервера: " .. response)
-            return nil
-        end
-        return response
-    end
+local function HideUI()
+    print("[Yoxi Loader] Удаление UI...")
+    pcall(function() screenGui:Destroy() end)
+end
 
-    local function ShowLoadingUI()
-        local targetParent = GetSafeGuiParent()
-        if not targetParent then return function() end end
+print("[Yoxi Loader] Шаг 4: Сбор данных")
+local placeId = tostring(game.PlaceId)
+local gameId = tostring(game.GameId)
+local API_URL = "https://yoxi-hub.fun/api/loader?placeId=" .. placeId .. "&t=" .. tostring(os.time())
 
-        local TITLE_TEXT = "YOXI HUB"
-        local LOGO_ID = "rbxassetid://80841138859899"
-        local FONT = Enum.Font.GothamBlack
-        local CHAR_APPEAR_DELAY = 0.06
-        local BACKGROUND_FADE_IN = 1
-        local BLUR_SIZE = 18
+_spawn(function()
+    print("[Yoxi Loader] Шаг 5: HTTP Запрос к серверу...")
+    local success, response = pcall(function()
+        return game:HttpGet(API_URL)
+    end)
 
-        local black = Color3.fromRGB(5, 2, 2)
-        local veryDarkRed = Color3.fromRGB(40, 0, 0)
-        local neonRed = Color3.fromRGB(255, 15, 15)
-
-        for _, c in pairs(targetParent:GetChildren()) do
-            if c.Name == "YOXI_Loader" then
-                pcall(function() c:Destroy() end)
-            end
-        end
-
-        local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = "YOXI_Loader"
-        screenGui.IgnoreGuiInset = true
-        screenGui.ResetOnSpawn = false
-        screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-        pcall(function() syn.protect_gui(screenGui) end)
-        screenGui.Parent = targetParent
-
-        local background = Instance.new("Frame")
-        background.Size = UDim2.new(1, 0, 1, 0)
-        background.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        background.BackgroundTransparency = 1
-        background.BorderSizePixel = 0
-        background.Parent = screenGui
-
-        local bgGradient = Instance.new("UIGradient")
-        bgGradient.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, black),
-            ColorSequenceKeypoint.new(0.5, veryDarkRed),
-            ColorSequenceKeypoint.new(1, black)
-        })
-        bgGradient.Rotation = 90
-        bgGradient.Parent = background
-
-        local blur = Instance.new("BlurEffect")
-        blur.Size = 0
-        blur.Parent = Lighting
-
-        local centerContainer = Instance.new("Frame")
-        centerContainer.Size = UDim2.new(1, 0, 1, 0)
-        centerContainer.BackgroundTransparency = 1
-        centerContainer.Parent = background
-
-        local function createParticles()
-            coroutine.wrap(function()
-                while background.Parent do
-                    local particle = Instance.new("Frame")
-                    local size = math.random(2, 5)
-                    particle.Size = UDim2.new(0, size, 0, size)
-                    particle.Position = UDim2.new(math.random(), 0, 1.1, 0)
-                    particle.BackgroundColor3 = neonRed
-                    particle.BackgroundTransparency = math.random(50, 80) / 100
-                    
-                    local corner = Instance.new("UICorner")
-                    corner.CornerRadius = UDim.new(1, 0)
-                    corner.Parent = particle
-                    particle.Parent = background
-
-                    local tween = TweenService:Create(particle, TweenInfo.new(math.random(3, 8), Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
-                        Position = UDim2.new(particle.Position.X.Scale + math.random(-5, 5)/100, 0, math.random(10, 60)/100, 0),
-                        BackgroundTransparency = 1
-                    })
-                    tween:Play()
-                    tween.Completed:Connect(function() particle:Destroy() end)
-                    _wait(math.random(1, 4) / 10)
-                end
-            end)()
-        end
-
-        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-        local isMobile = UserInputService.TouchEnabled
-        local textSize = math.clamp(isMobile and 40 or 70, 30, 130)
-        local holderWidth = math.floor(vp.X * (isMobile and 0.95 or 0.7))
-
-        local textHolder = Instance.new("Frame")
-        textHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-        textHolder.Position = UDim2.new(0.5, 0, isMobile and 0.50 or 0.55, 0)
-        textHolder.BackgroundTransparency = 1
-        textHolder.Parent = centerContainer
-
-        local logoSize = isMobile and (textSize * 1.5) or (textSize * 2.5)
-        local logo = Instance.new("ImageLabel")
-        logo.AnchorPoint = Vector2.new(0.5, 0.5)
-        logo.Position = UDim2.new(0.5, 0, isMobile and 0.35 or 0.38, 0)
-        logo.Size = UDim2.new(0, logoSize * 0.5, 0, logoSize * 0.5)
-        logo.BackgroundTransparency = 1
-        logo.Image = LOGO_ID
-        logo.ImageTransparency = 1
-        logo.ScaleType = Enum.ScaleType.Fit
-        logo.Parent = centerContainer
-
-        local subText = Instance.new("TextLabel")
-        subText.AnchorPoint = Vector2.new(0.5, 0.5)
-        subText.Position = UDim2.new(0.5, 0, isMobile and 0.58 or 0.65, 0)
-        subText.Size = UDim2.new(0.9, 0, 0, textSize * 0.6)
-        subText.BackgroundTransparency = 1
-        subText.Text = "Loading Yoxi Hub, wait some pls :3"
-        subText.Font = Enum.Font.GothamMedium
-        subText.TextSize = isMobile and 16 or math.clamp(textSize * 0.25, 12, 24)
-        subText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        subText.TextTransparency = 1
-        subText.Parent = centerContainer
-
-        local function createCharLabels(text, textSz, font, holderW)
-            local charInfos = {}
-            local totalW, spacing = 0, math.floor(textSz * 0.05)
-
-            for i = 1, #text do
-                local ch = string.sub(text, i, i)
-                local w = math.ceil(TextService:GetTextSize(ch, textSz, font, Vector2.new(2000, 2000)).X)
-                table.insert(charInfos, {char = ch, w = w})
-                totalW = totalW + w
-            end
-            totalW = totalW + spacing * (#text - 1)
-
-            local x = math.floor((holderW - totalW) / 2)
-            textHolder.Size = UDim2.new(0, holderW, 0, textSize * 1.5)
-            local charLabels = {}
-
-            for _, info in ipairs(charInfos) do
-                local container = Instance.new("Frame")
-                container.Size = UDim2.new(0, info.w, 1, 0)
-                container.Position = UDim2.new(0, x, 0, 40)
-                container.BackgroundTransparency = 1
-                container.Parent = textHolder
-
-                local lbl = Instance.new("TextLabel")
-                lbl.Size = UDim2.new(1, 0, 1, 0)
-                lbl.BackgroundTransparency = 1
-                lbl.Text = info.char
-                lbl.TextSize = textSz
-                lbl.Font = font
-                lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-                lbl.TextTransparency = 1
-                lbl.Parent = container
-
-                local g = Instance.new("UIGradient")
-                g.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, neonRed), ColorSequenceKeypoint.new(0.5, veryDarkRed), ColorSequenceKeypoint.new(1, neonRed) })
-                g.Rotation = 90
-                g.Parent = lbl
-
-                table.insert(charLabels, { container = container, label = lbl, gradient = g, xFinal = x })
-                x = x + info.w + spacing
-            end
-            return charLabels
-        end
-
-        local labels = createCharLabels(TITLE_TEXT, textSize, FONT, holderWidth)
-        local isRunning = true
-
-        TweenService:Create(background, TweenInfo.new(BACKGROUND_FADE_IN, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), { BackgroundTransparency = 0.05 }):Play()
-        TweenService:Create(blur, TweenInfo.new(BACKGROUND_FADE_IN, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), { Size = BLUR_SIZE }):Play()
-        createParticles()
-
-        TweenService:Create(logo, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.new(0, logoSize, 0, logoSize), ImageTransparency = 0 }):Play()
-
-        for i, info in ipairs(labels) do
-            -- ТУТ БЫЛ БАГ (заменили task.delay на безопасный _delay)
-            _delay(i * CHAR_APPEAR_DELAY, function()
-                if not isRunning then return end
-                TweenService:Create(info.container, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Position = UDim2.new(0, info.xFinal, 0, 0) }):Play()
-                TweenService:Create(info.label, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
-            end)
-        end
-
-        _delay((#labels * CHAR_APPEAR_DELAY) + 0.3, function()
-            if not isRunning then return end
-            TweenService:Create(subText, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0.1 }):Play()
-            coroutine.wrap(function()
-                _wait(1)
-                while isRunning and subText.Parent do
-                    TweenService:Create(subText, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { TextTransparency = 0.8 }):Play()
-                    _wait(2)
-                    if not isRunning then break end
-                    TweenService:Create(subText, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { TextTransparency = 0.1 }):Play()
-                    _wait(3.5)
-                end
-            end)()
-        end)
-
-        coroutine.wrap(function()
-            local offset = -1
-            while isRunning and background.Parent do
-                offset = (offset > 1) and -1 or offset + 0.008
-                for _, info in ipairs(labels) do info.gradient.Offset = Vector2.new(0, offset) end
-                RunService.RenderStepped:Wait()
-            end
-        end)()
-
-        local function HideUI()
-            isRunning = false
-            pcall(function()
-                local s = Instance.new("Sound")
-                s.SoundId = "rbxassetid://132067856318530"
-                s.Volume = 1
-                s.Parent = workspace
-                s:Play()
-                _delay(5, function() pcall(function() s:Destroy() end) end)
-            end)
-
-            TweenService:Create(logo, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Size = UDim2.new(0, logoSize * 0.5, 0, logoSize * 0.5), ImageTransparency = 1 }):Play()
-            TweenService:Create(subText, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
-
-            for i, info in ipairs(labels) do
-                TweenService:Create(info.container, TweenInfo.new(0.7, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Position = UDim2.new(0, info.xFinal + math.random(-25,25), 0, 60) }):Play()
-                TweenService:Create(info.label, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
-                _wait(0.02)
-            end
-
-            local hideTween = TweenService:Create(background, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { BackgroundTransparency = 1 })
-            local blurTween = TweenService:Create(blur, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Size = 0 })
-
-            hideTween:Play()
-            blurTween:Play()
-            hideTween.Completed:Wait()
-
-            pcall(function() screenGui:Destroy(); blur:Destroy() end)
-        end
-
-        return HideUI
-    end
-
-    local hideUIFunc = ShowLoadingUI()
-    local placeId, gameId = getIds()
-    local player = Players.LocalPlayer
-
-    if MAINTENANCE_MODE and (player and player.Name ~= ALLOWED_TESTER) then
-        _wait(2)
-        player:Kick("🔧 Yoxi Hub is updating!\n\nThe script is temporarily unavailable.")
+    if not success then
+        warn("[Yoxi Loader] Ошибка сети (game:HttpGet): " .. tostring(response))
+        textLabel.Text = "Network Error"
+        _delay(3, HideUI)
         return
     end
 
-    local minDisplayTime = 5
-    local startTime = os.clock()
+    if type(response) ~= "string" or response == "" or response:find("<html") then
+        warn("[Yoxi Loader] Сервер вернул мусор или капчу Cloudflare!")
+        textLabel.Text = "Cloudflare Blocked"
+        _delay(3, HideUI)
+        return
+    end
 
-    _spawn(function()
-        _wait(2)
-        local source = nil
-        for attempt = 1, 3 do
-            local requestUrl = API_URL .. "?placeId=" .. placeId .. "&gameId=" .. gameId .. "&t=" .. tostring(os.time())
-            local s, res = pcall(function() return doHttpGet(requestUrl) end)
-            if s and res then
-                source = normalizeResponse(res)
-                if source then break end
-            end
-            _wait(2 * attempt)
-        end
+    print("[Yoxi Loader] Шаг 6: Компиляция кода...")
+    local fn, compileErr = _loadstring(response)
+    
+    if not fn then
+        warn("[Yoxi Loader] Ошибка компиляции кода (Синтаксис): " .. tostring(compileErr))
+        textLabel.Text = "Compile Error"
+        _delay(3, HideUI)
+        return
+    end
 
-        if source then
-            if type(_loadstring) ~= "function" then
-                player:Kick("Ошибка: Твой мобильный экзекутор вообще не поддерживает функцию loadstring.")
-                return
-            end
-            
-            local fn, compileErr = _loadstring(source)
-            if fn then
-                local ok, execErr = pcall(fn)
-                if not ok then warn("[Yoxi Hub] Ошибка в загруженном скрипте: " .. tostring(execErr)) end
-            else
-                warn("[Yoxi Hub] Ошибка компиляции кода: " .. tostring(compileErr))
-            end
-        else
-            warn("[Yoxi Hub] Не удалось скачать скрипт или Cloudflare выдал HTML заглушку.")
-        end
-
-        local elapsed = os.clock() - startTime
-        if elapsed < minDisplayTime then _wait(minDisplayTime - elapsed) end
-        hideUIFunc()
-    end)
+    print("[Yoxi Loader] Шаг 7: Запуск основного скрипта (ХАБА)...")
+    HideUI() -- Скрываем лоадер перед запуском
+    
+    local execSuccess, execErr = pcall(fn)
+    
+    if not execSuccess then
+        warn("\n\n[YOXI HUB CRASHED]\nОшибка произошла ВНУТРИ самого хаба (uniyo.txt), а не в лоадере!\nТекст ошибки: " .. tostring(execErr) .. "\n\n")
+    else
+        print("[Yoxi Loader] Хаб успешно загружен!")
+    end
 end)
-
--- ЕСЛИ ЧТО-ТО ВСЁ-ТАКИ КРАШНЕТСЯ, ОНО ПОКАЖЕТ ОШИБКУ ТЕКСТОМ НА ЭКРАНЕ
-if not success then
-    local s, errParent = pcall(function() return game:GetService("CoreGui") end)
-    if not s or not errParent then errParent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui") end
-    
-    local sg = Instance.new("ScreenGui", errParent)
-    local txt = Instance.new("TextLabel", sg)
-    txt.Size = UDim2.new(1, 0, 0, 100)
-    txt.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-    txt.TextColor3 = Color3.new(1, 1, 1)
-    txt.TextScaled = true
-    txt.Text = "YOXI LOADER CRASHED:\n" .. tostring(fatal_error)
-    
-    task.spawn(function()
-        task.wait(15)
-        pcall(function() sg:Destroy() end)
-    end)
-end
